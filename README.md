@@ -38,6 +38,219 @@ The parking-slot information is also displayed on the **Wokwi Serial Monitor** u
 
 ---
 
+## program
+#include <stdio.h> #include <stdint.h> #include <stm32l0xx_hal.h>
+
+/* Slot 1 sensor pushbutton: D2 / PA10 */ #define SLOT1_PORT GPIOA #define SLOT1_PIN GPIO_PIN_10
+
+/* Slot 2 sensor pushbutton: D3 / PB0 */ #define SLOT2_PORT GPIOB #define SLOT2_PIN GPIO_PIN_0
+
+/* Onboard LED: D13 / PB3 */ #define FULL_LED_PORT GPIOB #define FULL_LED_PIN GPIO_PIN_3
+
+/* USART2 virtual serial pins */ #define VCP_TX_PIN GPIO_PIN_2 #define VCP_RX_PIN GPIO_PIN_15
+
+UART_HandleTypeDef huart2;
+
+void SystemClock_Config(void); static void MX_GPIO_Init(void); static void MX_USART2_UART_Init(void); static void Display_Parking_Status(uint8_t slot1, uint8_t slot2); void Error_Handler(void);
+
+int main(void) { uint8_t slot1Occupied = 0; uint8_t slot2Occupied = 0;
+
+GPIO_PinState previousSlot1Button = GPIO_PIN_SET; GPIO_PinState previousSlot2Button = GPIO_PIN_SET;
+
+GPIO_PinState currentSlot1Button; GPIO_PinState currentSlot2Button;
+
+HAL_Init(); SystemClock_Config();
+
+MX_GPIO_Init(); MX_USART2_UART_Init();
+
+printf("\r\n========================================\r\n"); printf("STM32 Automatic Vehicle Parking System\r\n"); printf("========================================\r\n"); printf("D2 / PA10 : Slot 1 sensor button\r\n"); printf("D3 / PB0 : Slot 2 sensor button\r\n"); printf("D13 / PB3 : Parking Full indicator\r\n\r\n");
+
+printf("Press a slot button to change its status.\r\n");
+
+Display_Parking_Status(slot1Occupied, slot2Occupied);
+
+while (1) { /* * Read both vehicle sensor pushbuttons. * The buttons use internal pull-up resistors: * * Released = GPIO_PIN_SET * Pressed = GPIO_PIN_RESET */ currentSlot1Button = HAL_GPIO_ReadPin(SLOT1_PORT, SLOT1_PIN);
+
+currentSlot2Button =
+    HAL_GPIO_ReadPin(SLOT2_PORT, SLOT2_PIN);
+
+/*
+ * Detect a new press of the Slot 1 button.
+ */
+if ((previousSlot1Button == GPIO_PIN_SET) &&
+    (currentSlot1Button == GPIO_PIN_RESET))
+{
+  HAL_Delay(50);
+
+  if (HAL_GPIO_ReadPin(SLOT1_PORT, SLOT1_PIN) ==
+      GPIO_PIN_RESET)
+  {
+    /*
+     * Toggle Slot 1 between available and occupied.
+     */
+    slot1Occupied = !slot1Occupied;
+
+    printf("\r\nSlot 1 sensor activated.\r\n");
+
+    Display_Parking_Status(
+        slot1Occupied,
+        slot2Occupied);
+  }
+}
+
+/*
+ * Detect a new press of the Slot 2 button.
+ */
+if ((previousSlot2Button == GPIO_PIN_SET) &&
+    (currentSlot2Button == GPIO_PIN_RESET))
+{
+  HAL_Delay(50);
+
+  if (HAL_GPIO_ReadPin(SLOT2_PORT, SLOT2_PIN) ==
+      GPIO_PIN_RESET)
+  {
+    /*
+     * Toggle Slot 2 between available and occupied.
+     */
+    slot2Occupied = !slot2Occupied;
+
+    printf("\r\nSlot 2 sensor activated.\r\n");
+
+    Display_Parking_Status(
+        slot1Occupied,
+        slot2Occupied);
+  }
+}
+
+previousSlot1Button = currentSlot1Button;
+previousSlot2Button = currentSlot2Button;
+
+HAL_Delay(20);
+} }
+
+/*
+
+Display the status of the parking area and control
+the Parking Full indicator LED. */ static void Display_Parking_Status( uint8_t slot1, uint8_t slot2) { uint8_t occupiedSlots; uint8_t availableSlots;
+occupiedSlots = slot1 + slot2; availableSlots = 2U - occupiedSlots;
+
+printf("----------------------------------------\r\n");
+
+printf("Slot 1: %s\r\n", slot1 ? "OCCUPIED" : "AVAILABLE");
+
+printf("Slot 2: %s\r\n", slot2 ? "OCCUPIED" : "AVAILABLE");
+
+printf("Available slots: %u\r\n", availableSlots);
+
+/*
+
+Both slots occupied means parking is full. */ if (availableSlots == 0U) { HAL_GPIO_WritePin( FULL_LED_PORT, FULL_LED_PIN, GPIO_PIN_SET);
+printf("Parking Status: FULL\r\n");
+printf("Entry gate: CLOSED\r\n");
+} else { HAL_GPIO_WritePin( FULL_LED_PORT, FULL_LED_PIN, GPIO_PIN_RESET);
+
+printf("Parking Status: SPACE AVAILABLE\r\n");
+printf("Entry gate: OPEN\r\n");
+}
+
+printf("----------------------------------------\r\n"); }
+
+/*
+
+GPIO initialization. */ static void MX_GPIO_Init(void) { GPIO_InitTypeDef GPIO_InitStruct = {0};
+__HAL_RCC_GPIOA_CLK_ENABLE(); __HAL_RCC_GPIOB_CLK_ENABLE();
+
+/*
+
+Configure Slot 1 pushbutton PA10 as an input. */ GPIO_InitStruct.Pin = SLOT1_PIN; GPIO_InitStruct.Mode = GPIO_MODE_INPUT; GPIO_InitStruct.Pull = GPIO_PULLUP; GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+HAL_GPIO_Init(SLOT1_PORT, &GPIO_InitStruct);
+
+/*
+
+Configure Slot 2 pushbutton PB0 as an input. */ GPIO_InitStruct.Pin = SLOT2_PIN; GPIO_InitStruct.Mode = GPIO_MODE_INPUT; GPIO_InitStruct.Pull = GPIO_PULLUP; GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+HAL_GPIO_Init(SLOT2_PORT, &GPIO_InitStruct);
+
+/*
+
+Configure PB3 onboard LED as an output. */ GPIO_InitStruct.Pin = FULL_LED_PIN; GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP; GPIO_InitStruct.Pull = GPIO_NOPULL; GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+HAL_GPIO_Init(FULL_LED_PORT, &GPIO_InitStruct);
+
+/*
+
+Initially switch the Parking Full LED OFF. */ HAL_GPIO_WritePin( FULL_LED_PORT, FULL_LED_PIN, GPIO_PIN_RESET); }
+/*
+
+System clock configuration. */ void SystemClock_Config(void) { RCC_OscInitTypeDef RCC_OscInitStruct = {0}; RCC_ClkInitTypeDef RCC_ClkInitStruct = {0}; RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+__HAL_PWR_VOLTAGESCALING_CONFIG( PWR_REGULATOR_VOLTAGE_SCALE1);
+
+RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+
+RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+
+RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+
+RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON; RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI; RCC_OscInitStruct.PLL.PLLMUL = RCC_PLLMUL_4; RCC_OscInitStruct.PLL.PLLDIV = RCC_PLLDIV_2;
+
+if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) { Error_Handler(); }
+
+RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+
+RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+
+RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+
+RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+
+RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+if (HAL_RCC_ClockConfig( &RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK) { Error_Handler(); }
+
+PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2;
+
+PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
+
+if (HAL_RCCEx_PeriphCLKConfig( &PeriphClkInit) != HAL_OK) { Error_Handler(); } }
+
+/*
+
+USART2 initialization. */ static void MX_USART2_UART_Init(void) { GPIO_InitTypeDef GPIO_InitStruct = {0};
+__HAL_RCC_GPIOA_CLK_ENABLE(); __HAL_RCC_USART2_CLK_ENABLE();
+
+/*
+
+PA2 -> USART2_TX
+PA15 -> USART2_RX */ GPIO_InitStruct.Pin = VCP_TX_PIN | VCP_RX_PIN;
+GPIO_InitStruct.Mode = GPIO_MODE_AF_PP; GPIO_InitStruct.Pull = GPIO_NOPULL;
+
+GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+
+GPIO_InitStruct.Alternate = GPIO_AF4_USART2;
+
+HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+huart2.Instance = USART2; huart2.Init.BaudRate = 115200; huart2.Init.WordLength = UART_WORDLENGTH_8B; huart2.Init.StopBits = UART_STOPBITS_1; huart2.Init.Parity = UART_PARITY_NONE; huart2.Init.Mode = UART_MODE_TX_RX; huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE; huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+
+huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+
+huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+if (HAL_UART_Init(&huart2) != HAL_OK) { Error_Handler(); } }
+
+/*
+
+Error handler. */ void Error_Handler(void) { HAL_GPIO_WritePin( FULL_LED_PORT, FULL_LED_PIN, GPIO_PIN_RESET);
+while (1) { } }
+
+/*
+
+Redirect printf() output to USART2. */ #define STDOUT_FILENO 1 #define STDERR_FILENO 2
+int _write(int file, uint8_t *ptr, int len) { if ((file == STDOUT_FILENO) || (file == STDERR_FILENO)) { HAL_UART_Transmit( &huart2, ptr, len, HAL_MAX_DELAY);
+
+return len;
+}
+
+return -1; }
+
 ## Pin Configuration
 
 | Component | STM32 Pin | Function |
